@@ -1,73 +1,75 @@
-name: Security Scan (Semgrep + Snyk)
+name: 🔒 Analyse de sécurité (Semgrep + Snyk)
 
 on:
   push:
-    branches: [ main ]
+    branches: [ "main" ]
   pull_request:
-    branches: [ main ]
+    branches: [ "main" ]
   workflow_dispatch:
 
 permissions:
   contents: read
-  security-events: write  # pour envoyer les résultats SARIF dans GitHub
+  security-events: write
 
 jobs:
   semgrep:
     name: Semgrep SAST
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Semgrep
+      - name: Run Semgrep scan
         uses: returntocorp/semgrep-action@v1
-        env:
-          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
-          SEMGREP_RULES: >-
-            p/owasp-top-ten
         with:
-          publishToken: ${{ secrets.SEMGREP_APP_TOKEN }}
-          publishDeployment: true
+          config: >-
+            p/ci
+            p/security-audit
+          generateSarif: true
+
+      - name: Upload Semgrep results to GitHub Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
 
   snyk:
     name: Snyk SCA (Python)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Show workspace (debug)
+      - name: Afficher l’arborescence du projet (debug)
         run: |
-          echo "PWD=$(pwd)"
-          echo "List of files:"
-          ls -la
-          echo "If your requirements file is in a subfolder, adjust path."
+          echo "📂 Contenu du répertoire :"
+          ls -R .
+          echo "Si requirements.txt n'est pas à la racine, ajuste le chemin dans la commande Snyk."
 
-      - name: Run Snyk test (produce SARIF)
+      - name: Exécuter le scan Snyk
         uses: snyk/actions/python@master
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
           args: test --all-projects --sarif-file-output=snyk.sarif || true
 
-      - name: Check SARIF file exists (debug)
+      - name: Vérifier la présence du fichier SARIF (debug)
         run: |
           if [ -f snyk.sarif ]; then
-            echo "✅ snyk.sarif found, showing first lines:"
-            head -n 40 snyk.sarif
+            echo "✅ Fichier snyk.sarif trouvé"
+            head -n 30 snyk.sarif
           else
-            echo "⚠️ snyk.sarif not found!"
+            echo "⚠️ Aucun fichier snyk.sarif trouvé !"
           fi
 
-      - name: Upload SARIF to GitHub Code Scanning (if present)
+      - name: Upload vers GitHub Code Scanning
         if: always()
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: snyk.sarif
 
-      - name: Upload SARIF as artifact (for manual download)
+      - name: Upload du rapport Snyk en tant qu’artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: snyk-sarif
+          name: snyk-scan-results
           path: snyk.sarif
