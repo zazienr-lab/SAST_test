@@ -30,20 +30,54 @@ jobs:
           publishDeployment: true
 
   snyk:
-    name: Snyk SCA
+    name: Snyk SCA (Python)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run Snyk to check for vulnerabilities
+      - name: Show workspace (debug)
+        run: |
+          echo "PWD=$(pwd)"
+          echo "List of files:"
+          ls -la
+          echo "If your requirements file is in a subfolder, adjust path."
+
+      - name: Run Snyk test (produce SARIF)
+        # Use the official Snyk action for python. Provide token via env.
+        # We append "|| true" so the shell step never returns non-zero exit code
+        # (so the job doesn't fail because vulnerabilities were found).
         uses: snyk/actions/python@master
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
-          args: --all-projects --sarif-file-output=snyk.sarif || true
+          # 'args' is passed to the snyk CLI inside the action
+          args: test --all-projects --sarif-file-output=snyk.sarif || true
 
-      - name: Upload results to GitHub Code Scanning
+      - name: Check SARIF file exists (debug)
+        run: |
+          if [ -f snyk.sarif ]; then
+            echo "snyk.sarif found, size:"
+            stat -c '%n %s' snyk.sarif || true
+            echo "First lines of SARIF:"
+            head -n 40 snyk.sarif || true
+          else
+            echo "No snyk.sarif generated."
+            ls -la
+            exit 0
+          fi
+        # even if something above fails, continue so upload step runs when appropriate
+        continue-on-error: true
+
+      - name: Upload SARIF to GitHub Code Scanning (if present)
+        if: ${{ always() && (files.exists('snyk.sarif') || env.ALWAYS_UPLOAD == 'true') }}
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: snyk.sarif
+
+      - name: Upload SARIF as artifact (for manual download)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: snyk-sarif
+          path: snyk.sarif
